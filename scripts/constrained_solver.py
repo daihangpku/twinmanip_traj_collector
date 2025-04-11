@@ -24,8 +24,6 @@ from curobo.wrap.reacher.motion_gen import (
 
 import argparse
 
-from curobo.util.usd_helper import UsdHelper
-
 parser = argparse.ArgumentParser()
 
 

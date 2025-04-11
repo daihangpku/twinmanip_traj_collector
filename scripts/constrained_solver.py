@@ -1,5 +1,5 @@
 import torch
-
+import json
 a = torch.zeros(4, device="cuda:0")
 
 # Third Party
@@ -21,7 +21,8 @@ from curobo.wrap.reacher.motion_gen import (
     MotionGenPlanConfig,
     PoseCostMetric,
 )
-
+from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
+from curobo.util_file import get_robot_path
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -33,31 +34,37 @@ args = parser.parse_args()
 
 
 if __name__ == "__main__":
-
-    n_obstacle_cuboids = 10
-    n_obstacle_mesh = 10
-
-    # target_orient = [0,0,0.707,0.707]
-    target_orient = [0.5, -0.5, 0.5, 0.5]
-
-
+    sim_js = [-0.95555313,  1.11025978 , 0.66254836, -1.85974693,  0.83744874,  1.87575201,
+ -1.77852278]
+    sim_js_names = ["panda_joint1","panda_joint2","panda_joint3","panda_joint4", "panda_joint5",
+      "panda_joint6","panda_joint7"]
+ # Set EE teleop goals, use cube for simple non-vr init:
+    ee_translation_goal =[0.54131516, 0.08129586, 0.05194307] #[ 0.52246403 -0.07636242  0.27630054]
+    ee_orientation_teleop_goal = [-0.48969682 , 0.51585968 , 0.48066197 , 0.51288387]
     collision_checker_type = CollisionCheckerType.BLOX
 
     tensor_args = TensorDeviceType()
 
-    robot_cfg = load_yaml(join_path(get_robot_configs_path(), args.robot))["robot_cfg"]
+    config_file = load_yaml(join_path(get_robot_path(), "franka.yml"))
+    print(join_path(get_robot_path(), "franka.yml"))
+    urdf_file = config_file["robot_cfg"]["kinematics"][
+        "urdf_path"
+    ]  
+    base_link = config_file["robot_cfg"]["kinematics"]["base_link"]
+    ee_link = config_file["robot_cfg"]["kinematics"]["ee_link"]
 
-    j_names = robot_cfg["kinematics"]["cspace"]["joint_names"]
-    default_config = robot_cfg["kinematics"]["cspace"]["retract_config"]
-
+    robot_cfg = RobotConfig.from_basic(urdf_file, base_link, ee_link, tensor_args)
+    kin_model = CudaRobotModel(robot_cfg.kinematics)
+    # compute forward kinematics:
+    q = torch.tensor(sim_js).to(device="cuda:0")
+    out = kin_model.get_state(q)
+    print(out)
     motion_gen_config = MotionGenConfig.load_from_robot_config(
         robot_cfg,
         None,
         tensor_args,
-        collision_checker_type=CollisionCheckerType.MESH,
-        collision_cache={"obb": n_obstacle_cuboids, "mesh": n_obstacle_mesh},
         interpolation_dt=0.02,
-        ee_link_name="right_gripper",
+        ee_link_name="ee_link",
     )
     motion_gen = MotionGen(motion_gen_config)
     print("warming up..")
@@ -75,29 +82,26 @@ if __name__ == "__main__":
         time_dilation_factor=0.5,
     )
 
-    print("Constrained: Holding tool linear-y")
+    #print("Constrained: Holding tool linear-y")
     pose_cost_metric = PoseCostMetric(
         hold_partial_pose=True,
-        hold_vec_weight=motion_gen.tensor_args.to_device([0, 0, 0, 0, 1, 0]),
+        hold_vec_weight=motion_gen.tensor_args.to_device([1, 1, 1, 1, 1, 0]),
     )
 
     plan_config.pose_cost_metric = pose_cost_metric
 
     # motion generation:
-    sim_js = robot.get_joints_state()
-    sim_js_names = robot.dof_names
+    
     cu_js = JointState(
-        position=tensor_args.to_device(sim_js.positions),
-        velocity=tensor_args.to_device(sim_js.velocities) * 0.0,
-        acceleration=tensor_args.to_device(sim_js.velocities) * 0.0,
-        jerk=tensor_args.to_device(sim_js.velocities) * 0.0,
+        position=tensor_args.to_device(sim_js),
+        velocity=tensor_args.to_device(sim_js) * 0.0,
+        acceleration=tensor_args.to_device(sim_js) * 0.0,
+        jerk=tensor_args.to_device(sim_js) * 0.0,
         joint_names=sim_js_names,
     )
     cu_js = cu_js.get_ordered_joint_state(motion_gen.kinematics.joint_names)
 
-    # Set EE teleop goals, use cube for simple non-vr init:
-    ee_translation_goal = cube_position
-    ee_orientation_teleop_goal = cube_orientation
+   
 
     # compute curobo solution:
     ik_goal = Pose(
@@ -109,13 +113,28 @@ if __name__ == "__main__":
 
     succ = result.success.item()  # ik_result.success.item()
     if succ:
+        print("success")
         cmd_plan = result.get_interpolated_plan()
         cmd_plan = motion_gen.get_full_js(cmd_plan)
         # get only joint names that are in both:
-
-        cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
+        q = torch.tensor(cmd_plan.position[-1]).to(device="cuda:0")
+        out = kin_model.get_state(q)
+        print(out)
+        cmd_plan_dict = {
+            "position": cmd_plan.position.cpu().numpy().tolist(),
+            "velocity": cmd_plan.velocity.cpu().numpy().tolist(),
+            "acceleration": cmd_plan.acceleration.cpu().numpy().tolist(),
+            "jerk": cmd_plan.jerk.cpu().numpy().tolist(),
+            "joint_names": cmd_plan.joint_names,
+        }
+        with open("cmd_plan.json", "w") as json_file:
+            json.dump(cmd_plan_dict, json_file, indent=4)
+        print("Saved cmd_plan to cmd_plan.json")
+        #print(cmd_plan)
+        #cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
 
     else:
+        print("failed")
         pass
         
     print("finished program")

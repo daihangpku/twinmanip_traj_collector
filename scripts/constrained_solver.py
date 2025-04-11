@@ -23,29 +23,41 @@ from curobo.wrap.reacher.motion_gen import (
 )
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel, CudaRobotModelConfig
 from curobo.util_file import get_robot_path
-import argparse
 
-parser = argparse.ArgumentParser()
+def visualize(ee_translation):
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    import numpy as np
+    # 提取 x, y, z 坐标
+    x = ee_translation[:, 0]
+    y = ee_translation[:, 1]
+    z = ee_translation[:, 2]
 
+    # 创建 3D 图
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
 
-parser.add_argument("--robot", type=str, default="franka.yml", help="robot configuration to load")
+    # 绘制点
+    ax.scatter(x, y, z, c='r', marker='o', label='Points')
 
-args = parser.parse_args()
+    # 添加坐标轴标签
+    ax.set_xlabel('X Axis')
+    ax.set_ylabel('Y Axis')
+    ax.set_zlabel('Z Axis')
 
+    ax.set_title('3D Point Visualization')
+    ax.legend()
+    plt.show()
 
-def solve(joint_state, ee_translation_goal, ee_orientation_goal):
-    #joint_state = [-0.95555313,  1.11025978 , 0.66254836, -1.85974693,  0.83744874,  1.87575201, -1.77852278]
+def solve(joint_state, ee_translation_goal, ee_orientation_goal, args):
     js_names = ["panda_joint1","panda_joint2","panda_joint3","panda_joint4", "panda_joint5",
       "panda_joint6","panda_joint7"]
- # Set EE teleop goals, use cube for simple non-vr init:
-    # ee_translation_goal =[0.54131516, 0.08129586, 0.05194307] #[ 0.52246403 -0.07636242  0.27630054]
-    # ee_orientation_goal = [-0.48969682 , 0.51585968 , 0.48066197 , 0.51288387]
-    collision_checker_type = CollisionCheckerType.BLOX
+
+    #collision_checker_type = CollisionCheckerType.BLOX
 
     tensor_args = TensorDeviceType()
 
-    config_file = load_yaml(join_path(get_robot_path(), "franka.yml"))
-    print(join_path(get_robot_path(), "franka.yml"))
+    config_file = load_yaml(join_path(get_robot_path(), args.robot))#need to change
     urdf_file = config_file["robot_cfg"]["kinematics"][
         "urdf_path"
     ]  
@@ -57,7 +69,8 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal):
     # compute forward kinematics:
     q = torch.tensor(joint_state).to(device="cuda:0")
     out = kin_model.get_state(q)
-    print(out)
+    print("fk_ee_position: ", out.ee_position)
+    print("fk_ee_quaternion: ", out.ee_quaternion)
     motion_gen_config = MotionGenConfig.load_from_robot_config(
         robot_cfg,
         None,
@@ -69,9 +82,7 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal):
     print("warming up..")
     motion_gen.warmup(warmup_js_trajopt=False)
 
-    # world_model = motion_gen.world_collision
     tensor_args = TensorDeviceType()
-    cmd_plan = None
 
     plan_config = MotionGenPlanConfig(
         enable_graph=False,
@@ -81,16 +92,15 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal):
         time_dilation_factor=0.5,
     )
 
-    #print("Constrained: Holding tool linear-y")
+    #print("Constrained: Holding ")
     pose_cost_metric = PoseCostMetric(
         hold_partial_pose=True,
-        hold_vec_weight=motion_gen.tensor_args.to_device([1, 1, 1, 1, 1, 0]),
+        hold_vec_weight=motion_gen.tensor_args.to_device([1, 1, 1, 0, 0, 0]),
     )
 
     plan_config.pose_cost_metric = pose_cost_metric
 
     # motion generation:
-    
     cu_js = JointState(
         position=tensor_args.to_device(joint_state),
         velocity=tensor_args.to_device(joint_state) * 0.0,
@@ -108,33 +118,32 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal):
         quaternion=tensor_args.to_device(ee_orientation_goal),
     )
     result = motion_gen.plan_single(cu_js.unsqueeze(0), ik_goal, plan_config)
-    # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
 
-    succ = result.success.item()  # ik_result.success.item()
+    succ = result.success.item()  
     if succ:
         print("success")
-        cmd_plan = result.get_interpolated_plan()
-        cmd_plan = motion_gen.get_full_js(cmd_plan)
+        motion_plan = result.get_interpolated_plan()
+        motion_plan = motion_gen.get_full_js(motion_plan)
+        motion_plan = motion_plan.get_ordered_joint_state(js_names)
         # get only joint names that are in both:
-        q = torch.tensor(cmd_plan.position[-1]).to(device="cuda:0")
-        out = kin_model.get_state(q)
+        fk_out = kin_model.get_state(torch.tensor(motion_plan.position).to(device="cuda:0"))
         print(out)
-        cmd_plan_dict = {
-            "position": cmd_plan.position.cpu().numpy().tolist(),
-            "velocity": cmd_plan.velocity.cpu().numpy().tolist(),
-            "acceleration": cmd_plan.acceleration.cpu().numpy().tolist(),
-            "jerk": cmd_plan.jerk.cpu().numpy().tolist(),
-            "joint_names": cmd_plan.joint_names,
+        motion_plan_dict = {
+            "position": motion_plan.position.cpu().numpy().tolist(),
+            "ee_translation": out.ee_position.cpu().numpy().tolist(),
+            "joint_names": motion_plan.joint_names,
         }
-        with open("cmd_plan.json", "w") as json_file:
-            json.dump(cmd_plan_dict, json_file, indent=4)
-        print("Saved cmd_plan to cmd_plan.json")
-        #print(cmd_plan)
-        #cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
-        return cmd_plan.position.cpu().numpy().tolist()
+        if args.debug >= 2:
+            with open("motion_plan.json", "w") as json_file:
+                json.dump(motion_plan_dict, json_file, indent=4)
+            print("Saved motion_plan to motion_plan.json")
+        
+        if args.debug >= 1:
+            visualize(out.ee_position.cpu().numpy())
+        return motion_plan.position.cpu().numpy().tolist(), out.ee_position.cpu().numpy().tolist()
 
     else:
         print("failed")
-        pass
+        return None
         
-    print("finished program")
+    

@@ -1,0 +1,3 @@
+[submodule "motion_planner/curobo"]
+	path = motion_planner/curobo
+	url = https://github.com/NVlabs/curobo.git

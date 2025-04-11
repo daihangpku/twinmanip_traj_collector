@@ -2,6 +2,7 @@
 
 ## Installation
 ```bash
+git submodule update --init --recursive
 conda create -n traj_collector python=3.10 -y
 conda activate traj_collector
 # choosing your cuda version, this is for cuda 11.8
@@ -16,4 +17,31 @@ pip install genesis-world
 sudo apt install git-lfs
 cd motion_planner/curobo
 pip install -e . --no-build-isolation
+```
+### Recorder
+```bash
+cd twinmanip_realsense_recorder
+pip install -r requirements
+cd ..
+```
+
+## Installation(Using Frankapy)
+
+```bash
+conda activate frankapy
+source /home/daihang/workspace/frankapy/catkin_ws/devel/setup.bash
+```
+
+### Curobo
+```bash
+sudo apt install git-lfs
+cd motion_planner/curobo
+pip install -e . --no-build-isolation
+cd ../..
+```
+### Recorder
+```bash
+cd twinmanip_realsense_recorder
+pip install -r requirements
+cd ..
 ```

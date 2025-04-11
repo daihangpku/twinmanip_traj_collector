@@ -33,14 +33,13 @@ parser.add_argument("--robot", type=str, default="franka.yml", help="robot confi
 args = parser.parse_args()
 
 
-if __name__ == "__main__":
-    sim_js = [-0.95555313,  1.11025978 , 0.66254836, -1.85974693,  0.83744874,  1.87575201,
- -1.77852278]
-    sim_js_names = ["panda_joint1","panda_joint2","panda_joint3","panda_joint4", "panda_joint5",
+def solve(joint_state, ee_translation_goal, ee_orientation_goal):
+    #joint_state = [-0.95555313,  1.11025978 , 0.66254836, -1.85974693,  0.83744874,  1.87575201, -1.77852278]
+    js_names = ["panda_joint1","panda_joint2","panda_joint3","panda_joint4", "panda_joint5",
       "panda_joint6","panda_joint7"]
  # Set EE teleop goals, use cube for simple non-vr init:
-    ee_translation_goal =[0.54131516, 0.08129586, 0.05194307] #[ 0.52246403 -0.07636242  0.27630054]
-    ee_orientation_teleop_goal = [-0.48969682 , 0.51585968 , 0.48066197 , 0.51288387]
+    # ee_translation_goal =[0.54131516, 0.08129586, 0.05194307] #[ 0.52246403 -0.07636242  0.27630054]
+    # ee_orientation_goal = [-0.48969682 , 0.51585968 , 0.48066197 , 0.51288387]
     collision_checker_type = CollisionCheckerType.BLOX
 
     tensor_args = TensorDeviceType()
@@ -56,7 +55,7 @@ if __name__ == "__main__":
     robot_cfg = RobotConfig.from_basic(urdf_file, base_link, ee_link, tensor_args)
     kin_model = CudaRobotModel(robot_cfg.kinematics)
     # compute forward kinematics:
-    q = torch.tensor(sim_js).to(device="cuda:0")
+    q = torch.tensor(joint_state).to(device="cuda:0")
     out = kin_model.get_state(q)
     print(out)
     motion_gen_config = MotionGenConfig.load_from_robot_config(
@@ -93,11 +92,11 @@ if __name__ == "__main__":
     # motion generation:
     
     cu_js = JointState(
-        position=tensor_args.to_device(sim_js),
-        velocity=tensor_args.to_device(sim_js) * 0.0,
-        acceleration=tensor_args.to_device(sim_js) * 0.0,
-        jerk=tensor_args.to_device(sim_js) * 0.0,
-        joint_names=sim_js_names,
+        position=tensor_args.to_device(joint_state),
+        velocity=tensor_args.to_device(joint_state) * 0.0,
+        acceleration=tensor_args.to_device(joint_state) * 0.0,
+        jerk=tensor_args.to_device(joint_state) * 0.0,
+        joint_names=js_names,
     )
     cu_js = cu_js.get_ordered_joint_state(motion_gen.kinematics.joint_names)
 
@@ -106,7 +105,7 @@ if __name__ == "__main__":
     # compute curobo solution:
     ik_goal = Pose(
         position=tensor_args.to_device(ee_translation_goal),
-        quaternion=tensor_args.to_device(ee_orientation_teleop_goal),
+        quaternion=tensor_args.to_device(ee_orientation_goal),
     )
     result = motion_gen.plan_single(cu_js.unsqueeze(0), ik_goal, plan_config)
     # ik_result = ik_solver.solve_single(ik_goal, cu_js.position.view(1,-1), cu_js.position.view(1,1,-1))
@@ -132,6 +131,7 @@ if __name__ == "__main__":
         print("Saved cmd_plan to cmd_plan.json")
         #print(cmd_plan)
         #cmd_plan = cmd_plan.get_ordered_joint_state(common_js_names)
+        return cmd_plan.position.cpu().numpy().tolist()
 
     else:
         print("failed")

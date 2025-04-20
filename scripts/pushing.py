@@ -16,8 +16,8 @@ import os
 import threading
 from tqdm import tqdm
 POSE = [
-    [-0.35471786,  0.67136656, -0.12932039, -1.96341863,  0.79877985,  2.14604293,  1.27579102],#left
-
+    [-0.35471786,  0.67136656, -0.12932039, -1.96341863,  0.79877985,  2.14604293,  1.27579102],
+    [-1.12162436,  0.99415506,  0.60818567, -1.74134301,  0.3579409,   1.95144463,  1.53270908],
 ]
 def init_realsense(fps=30):
     pipeline = rs.pipeline()
@@ -32,8 +32,8 @@ def control_thread(fa, joint_state, joints_traj, init_time, args):
     pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
     time.sleep(1.0)
     fa.goto_joints(joint_state, duration=5, dynamic=True, buffer_time=10, ignore_virtual_walls=True, 
-                   k_gains= [500.0, 500.0, 500.0, 500.0, 700.0, 200.0, 80.0],
-                                      d_gains=[100.0, 100.0, 80.0, 80.0, 30.0, 20.0, 15.0],
+                   k_gains= [400.0, 350.0, 400.0, 400.0, 400.0, 150.0, 80.0],
+                                      d_gains=[100.0, 100.0, 80.0, 80.0, 80.0, 50.0, 15.0],
                    )
     rate = rospy.Rate(10)
     tss = []
@@ -52,7 +52,10 @@ def control_thread(fa, joint_state, joints_traj, init_time, args):
         timestamp = rospy.Time.now().to_time() - init_time
         tss.append(timestamp)
         #import ipdb; ipdb.set_trace()
-        cmd = joints_traj[len(joints_traj)//2] if flag else joints_traj[-1]
+        if i == 0:
+            cmd = joints_traj[i] 
+        else:
+            cmd = joints_traj[len(joints_traj)//2] if flag else joints_traj[-1]
         traj_gen_proto_msg = JointPositionSensorMessage(
             id=i, timestamp=rospy.Time.now().to_time() - init_time, 
             joints=cmd,
@@ -88,7 +91,7 @@ if __name__ == '__main__':
     parser.add_argument('--robot', type=str, default="franka.yml", help="robot configuration to load")
     parser.add_argument('--debug', type=int, default=0, help='debug level')
     parser.add_argument('--cmd_num', type=int, default=20, help='')
-    parser.add_argument('--save_dir', type=str, default='wood/traj14', help='index of the saved data')
+    parser.add_argument('--save_dir', type=str, default='ovaltine/traj_00020', help='index of the saved data')
     args = parser.parse_args()
     dir_name = args.save_dir
     os.makedirs(dir_name, exist_ok=True)
@@ -101,11 +104,11 @@ if __name__ == '__main__':
     os.makedirs(vis_dir,exist_ok=True)
 
     fa = FrankaArm()
-    fa.goto_joints(POSE[0], ignore_virtual_walls=True)
+    fa.goto_joints(POSE[1], ignore_virtual_walls=True, )
+    fa.close_gripper()
     rospy.loginfo('Initializing Sensor Publisher')
     #rate = rospy.Rate(30)
     #pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
-    fa.close_gripper()
     joint_state = fa.get_joints().astype('float32')
     ee_translation = fa.get_pose().translation.astype('float32')
     ee_quaternion = fa.get_pose().quaternion.astype('float32')
@@ -128,7 +131,7 @@ if __name__ == '__main__':
     # trans_goals.append(ee_translation)
     # rot_goals.append(ee_quaternion)
     X = 0.05
-    for i in range(7):
+    for i in range(5):
         trans_goals.append(ee_translation+z_proj* X*i)
         rot_goals.append(ee_quaternion)
     new_joint_state = joint_state
@@ -146,7 +149,6 @@ if __name__ == '__main__':
         )
         joints_traj+= j_traj
         ee_translation_traj += ee_traj
-
 
     joints_traj = joints_traj[::20]
     print(len(joints_traj))
@@ -181,7 +183,7 @@ if __name__ == '__main__':
     #start recording
     depth_images = []
     color_images = []
-    for i in range(150):
+    for i in range(90):
         frames = pipeline.wait_for_frames()
         frames = align.process(frames)
         depth_frame = None

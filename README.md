@@ -17,6 +17,7 @@ pip install genesis-world
 sudo apt install git-lfs
 cd motion_planner/curobo
 pip install -e . --no-build-isolation
+cd ../..
 ```
 ### Recorder
 ```bash
@@ -29,7 +30,7 @@ cd ..
 
 ```bash
 conda activate frankapy
-source /home/daihang/workspace/frankapy/catkin_ws/devel/setup.bash
+source ~/workspace/frankapy/catkin_ws/devel/setup.bash
 ```
 
 ### Curobo
@@ -42,6 +43,6 @@ cd ../..
 ### Recorder
 ```bash
 cd twinmanip_realsense_recorder
-pip install -r requirements
+pip install -r requirements.txt
 cd ..
 ```

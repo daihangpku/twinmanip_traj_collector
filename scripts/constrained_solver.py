@@ -47,9 +47,26 @@ def visualize(ee_translation):
 
     ax.set_title('3D Point Visualization')
     ax.legend()
+     # 获取坐标轴的最小值和最大值
+    x_min, x_max = np.min(x), np.max(x)
+    y_min, y_max = np.min(y), np.max(y)
+    z_min, z_max = np.min(z), np.max(z)
+
+    # 计算每个轴的最大范围
+    max_range = max(x_max - x_min, y_max - y_min, z_max - z_min)
+
+    # 计算轴的中心
+    x_center = (x_max + x_min) / 2
+    y_center = (y_max + y_min) / 2
+    z_center = (z_max + z_min) / 2
+
+    # 设置坐标轴的范围，使每个轴的比例相同
+    ax.set_xlim([x_center - max_range / 2, x_center + max_range / 2])
+    ax.set_ylim([y_center - max_range / 2, y_center + max_range / 2])
+    ax.set_zlim([z_center - max_range / 2, z_center + max_range / 2])
     plt.show()
 
-def solve(joint_state, ee_translation_goal, ee_orientation_goal, args):
+def solve(joint_state, ee_translation, ee_orientation, ee_translation_goal, ee_orientation_goal, args):
     js_names = ["panda_joint1","panda_joint2","panda_joint3","panda_joint4", "panda_joint5",
       "panda_joint6","panda_joint7"]
 
@@ -94,8 +111,8 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal, args):
 
     #print("Constrained: Holding ")
     pose_cost_metric = PoseCostMetric(
-        hold_partial_pose=True,
-        hold_vec_weight=motion_gen.tensor_args.to_device([1, 1, 1, 0, 0, 0]),
+        #hold_partial_pose=True,
+        hold_vec_weight=motion_gen.tensor_args.to_device([1, 1, 1, 0, 1, 0]),
     )
 
     plan_config.pose_cost_metric = pose_cost_metric
@@ -125,12 +142,12 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal, args):
         motion_plan = result.get_interpolated_plan()
         motion_plan = motion_gen.get_full_js(motion_plan)
         motion_plan = motion_plan.get_ordered_joint_state(js_names)
-        # get only joint names that are in both:
-        fk_out = kin_model.get_state(torch.tensor(motion_plan.position).to(device="cuda:0"))
-        print(out)
+
+        fk_out=kin_model.get_state(motion_plan.position)
+
         motion_plan_dict = {
             "position": motion_plan.position.cpu().numpy().tolist(),
-            "ee_translation": out.ee_position.cpu().numpy().tolist(),
+            "ee_translation": fk_out.ee_position.cpu().numpy().tolist(),
             "joint_names": motion_plan.joint_names,
         }
         if args.debug >= 2:
@@ -139,8 +156,9 @@ def solve(joint_state, ee_translation_goal, ee_orientation_goal, args):
             print("Saved motion_plan to motion_plan.json")
         
         if args.debug >= 1:
-            visualize(out.ee_position.cpu().numpy())
-        return motion_plan.position.cpu().numpy().tolist(), out.ee_position.cpu().numpy().tolist()
+            print("visualizing")
+            visualize(fk_out.ee_position.cpu().numpy())
+        return motion_plan.position.cpu().numpy().tolist(), fk_out.ee_position.cpu().numpy().tolist(), motion_plan.position[-1].cpu().numpy().tolist()
 
     else:
         print("failed")
